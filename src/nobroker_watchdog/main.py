@@ -10,9 +10,10 @@ from http.server import BaseHTTPRequestHandler, HTTPServer
 from typing import Any, Dict, List, Optional
 
 from nobroker_watchdog.config import AppConfig, load_config
+import datetime as dt
 from nobroker_watchdog.scraper.search_builder import build_search_targets, SearchTarget
 from nobroker_watchdog.scraper.fetcher import fetch_url, fetch_json, DEFAULT_HEADERS
-from nobroker_watchdog.scraper.parser import parse_list_page_html, parse_nobroker_api_json
+from nobroker_watchdog.scraper.parser import parse_search_page, parse_nobroker_api_json
 
 # ---------- logging ----------
 log = logging.getLogger("nobroker_watchdog.main")
@@ -55,6 +56,11 @@ def run_once(cfg: AppConfig) -> Dict[str, Any]:
         areas=cfg.areas,
         order_by="lastUpdatedDate desc",
         area_coords=cfg.area_coords,
+        bhk_in=cfg.bhk_in,
+        furnishing_in=cfg.furnishing_in,
+        carpet_min_sqft=cfg.carpet_min_sqft,
+        floors_allowed_in=cfg.floors_allowed_in,
+        proximity_km=cfg.proximity_km,
     )
 
     logging.getLogger("nobroker_watchdog.scraper.search_builder").info("search_urls_built")
@@ -77,7 +83,8 @@ def run_once(cfg: AppConfig) -> Dict[str, Any]:
             )
             if resp is None:
                 continue
-            cards = parse_list_page_html(resp.text)
+            now = dt.datetime.utcnow()
+            cards = parse_search_page(resp.text, now)
             logging.getLogger("nobroker_watchdog.scraper.parser").debug(
                 "page_parse_result", extra={"url": t.url, "raw_count": len(cards)}
             )
