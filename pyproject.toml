@@ -1,0 +1,38 @@
+[tool.poetry]
+name = "nobroker-watchdog"
+version = "1.0.0"
+description = "Monitors NoBroker for new rental listings and sends WhatsApp/SMS alerts."
+authors = ["You <you@example.com>"]
+readme = "README.md"
+packages = [{ include = "nobroker_watchdog", from = "src" }]
+
+[tool.poetry.dependencies]
+python = "^3.11"
+requests = "2.32.3"
+beautifulsoup4 = "4.12.3"
+pydantic = "2.8.2"
+pydantic-settings = "2.4.0"
+python-dotenv = "1.0.1"
+tenacity = "8.5.0"
+PyYAML = "6.0.2"
+python-dateutil = "2.9.0.post0"
+dateparser = "1.2.0"
+click = "8.1.7"
+urllib3 = "2.2.3"
+idna = "3.7"
+
+[tool.poetry.group.dev.dependencies]
+pytest = "8.3.2"
+pytest-cov = "5.0.0"
+ruff = "0.6.9"
+
+[tool.poetry.scripts]
+nobroker-watchdog = "nobroker_watchdog.main:cli"
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[build-system]
+requires = ["poetry-core>=1.9.0"]
+build-backend = "poetry.core.masonry.api"
