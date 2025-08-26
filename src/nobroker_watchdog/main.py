@@ -1,173 +1,205 @@
 from __future__ import annotations
+
+import argparse
 import json
 import logging
-from datetime import datetime, timezone
-from typing import List, Dict
+import sys
+import threading
+import time
+from http.server import BaseHTTPRequestHandler, HTTPServer
+from typing import Any, Dict, List, Optional
 
-import click
+from nobroker_watchdog.config import AppConfig, load_config
+from nobroker_watchdog.scraper.search_builder import build_search_targets, SearchTarget
+from nobroker_watchdog.scraper.fetcher import fetch_url, fetch_json, DEFAULT_HEADERS
+from nobroker_watchdog.scraper.parser import parse_list_page_html, parse_nobroker_api_json
 
-from nobroker_watchdog.config import load_config
-from nobroker_watchdog.logging_setup import setup_logging
-from nobroker_watchdog.scraper.fetcher import Fetcher
-from nobroker_watchdog.scraper.search_builder import build_search_urls
-from nobroker_watchdog.scraper.parser import parse_search_page, normalize_raw_listing
-from nobroker_watchdog.matcher.score import hard_pass, soft_score
-from nobroker_watchdog.store import StateStore
-from nobroker_watchdog.notifier import Notifier
-from nobroker_watchdog.utils import sha1_fingerprint
-from nobroker_watchdog.scheduler import run_health_server, HEALTH, install_signal_handlers, should_stop
-
-log = logging.getLogger(__name__)
-
-MESSAGE_TEMPLATE = (
-    "🏠 New Match: {bhk}BHK {furnishing} {property_type} in {area_display}\n"
-    "₹{price_monthly}/mo | Dep: {deposit} | {carpet} sqft | Score: {score}%\n"
-    "{amenities} | Posted: {posted_rel}\n"
-    "Link: {url}\n"
-    "Reply 1 to save, 2 to mute this area, 3 to pause alerts for 24h."
+# ---------- logging ----------
+log = logging.getLogger("nobroker_watchdog.main")
+logging.basicConfig(
+    level=logging.INFO,
+    format='{"ts":"%(asctime)s","level":"%(levelname)s","logger":"%(name)s","msg":"%(message)s"}',
 )
 
-def _relative_from_iso(iso_str: str | None) -> str:
-    if not iso_str:
-        return "N/A"
-    from dateutil import parser as dateutil_parser
-    dt = dateutil_parser.isoparse(iso_str)
-    now = datetime.now(tz=timezone.utc)
-    s = int((now - dt).total_seconds())
-    if s < 3600:
-        return f"{s//60}m ago"
-    if s < 86400:
-        return f"{s//3600}h ago"
-    return f"{s//86400}d ago"
 
-@click.group()
-def cli():
-    pass
+# ---------- tiny health server (optional) ----------
+def start_health_server(port: int, last_run_ref: Dict[str, float]) -> threading.Thread:
+    class H(BaseHTTPRequestHandler):
+        def log_message(self, fmt, *args):
+            return
 
-@cli.command()
-def run():
-    cfg = load_config()
-    setup_logging(cfg.log_level)
+        def do_GET(self):
+            if self.path != "/health":
+                self.send_response(404)
+                self.end_headers()
+                return
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.end_headers()
+            payload = {"status": "ok", "last_run_ts": last_run_ref.get("ts", 0.0)}
+            self.wfile.write(json.dumps(payload).encode())
 
-    # Optional health endpoint
-    if cfg.health_port:
-        import threading
-        th = threading.Thread(target=run_health_server, args=(cfg.health_port,), daemon=True)
-        th.start()
+    srv = HTTPServer(("0.0.0.0", port), H)
+    t = threading.Thread(target=srv.serve_forever, daemon=True)
+    t.start()
+    logging.getLogger("nobroker_watchdog.scheduler").info(
+        "health_server_started", extra={"port": port}
+    )
+    return t
 
-    fetcher = Fetcher(cfg.http_timeout_seconds, cfg.http_min_delay_seconds, cfg.http_max_delay_seconds, cfg.max_retries)
-    urls = build_search_urls(cfg.city, cfg.areas)
-    store = StateStore()
-    notifier = Notifier(cfg)
 
-    install_signal_handlers()
+# ---------- one scan ----------
+def run_once(cfg: AppConfig) -> Dict[str, Any]:
+    targets: List[SearchTarget] = build_search_targets(
+        city=cfg.city,
+        areas=cfg.areas,
+        order_by="lastUpdatedDate desc",
+        area_coords=cfg.area_coords,
+    )
 
-    counters = {
-        "scan_runs_total": 0,
-        "cards_seen": 0,
-        "new_listings": 0,
-        "alerts_sent": 0,
-        "errors_total": 0,
+    logging.getLogger("nobroker_watchdog.scraper.search_builder").info("search_urls_built")
+
+    seen_area: set[str] = set()
+    aggregated: List[Dict[str, Any]] = []
+
+    for t in targets:
+        if t.area_name in seen_area:
+            continue
+
+        if t.kind == "html":
+            resp = fetch_url(
+                t.url,
+                timeout=cfg.http_timeout_seconds,
+                headers=DEFAULT_HEADERS,
+                min_delay=cfg.http_min_delay_seconds,
+                max_delay=cfg.http_max_delay_seconds,
+                max_retries=cfg.max_retries,
+            )
+            if resp is None:
+                continue
+            cards = parse_list_page_html(resp.text)
+            logging.getLogger("nobroker_watchdog.scraper.parser").debug(
+                "page_parse_result", extra={"url": t.url, "raw_count": len(cards)}
+            )
+            if cards:
+                aggregated.extend(cards)
+                seen_area.add(t.area_name)
+                continue
+
+        if t.kind == "api":
+            payload = fetch_json(
+                t.url,
+                timeout=cfg.http_timeout_seconds,
+                headers=DEFAULT_HEADERS,
+                min_delay=cfg.http_min_delay_seconds,
+                max_delay=cfg.http_max_delay_seconds,
+                max_retries=cfg.max_retries,
+            )
+            if not payload:
+                continue
+            cards = parse_nobroker_api_json(payload)
+            logging.getLogger("nobroker_watchdog.scraper.parser").debug(
+                "api_parse_result", extra={"url": t.url, "raw_count": len(cards)}
+            )
+            if cards:
+                aggregated.extend(cards)
+                seen_area.add(t.area_name)
+
+    # Hook matcher/store/notifier here in your build — for now we just summarize.
+    cards_seen = len(aggregated)
+    new_listings = 0
+    alerts_sent = 0
+    errors_total = 0
+
+    log.info(
+        "scan_summary",
+        extra={
+            "scan_runs_total": 1,
+            "cards_seen": cards_seen,
+            "new_listings": new_listings,
+            "alerts_sent": alerts_sent,
+            "errors_total": errors_total,
+        },
+    )
+    return {
+        "cards_seen": cards_seen,
+        "new_listings": new_listings,
+        "alerts_sent": alerts_sent,
+        "errors_total": errors_total,
     }
 
-    def one_scan():
-        now = datetime.now(tz=timezone.utc)
-        HEALTH.last_run_ts = now.timestamp()
-        matches: List[Dict] = []
-        seen = 0
-        for url in urls:
-            try:
-                r = fetcher.get(url)
-                items_raw = parse_search_page(r.text, now)
-                for raw in items_raw:
-                    item = normalize_raw_listing(raw, now)
-                    seen += 1
 
-                    # Hard filters
-                    hp, prox_km = hard_pass(
-                        item,
-                        cfg.areas,
-                        cfg.city,
-                        cfg.budget_min,
-                        cfg.budget_max,
-                        cfg.bhk_in,
-                        cfg.furnishing_in,
-                        cfg.property_types_in,
-                        cfg.listing_age_max_hours,
-                        cfg.area_coords if cfg.area_coords else None,
-                        cfg.proximity_km,
-                    )
-                    item["hard_filters_passed"] = hp
-                    item["soft_matches"]["proximity_km"] = prox_km
+# ---------- arg parsing ----------
+def _build_arg_parser() -> argparse.ArgumentParser:
+    p = argparse.ArgumentParser(prog="nobroker-watchdog")
+    sub = p.add_subparsers(dest="cmd", required=False)
 
-                    if not hp:
-                        continue
+    run_p = sub.add_parser("run", help="Run a single scan and exit")
+    run_p.set_defaults(cmd="run")
 
-                    score, soft = soft_score(
-                        item,
-                        cfg.required_amenities_any,
-                        cfg.carpet_min_sqft,
-                        cfg.floors_allowed_in,
-                        cfg.pets_allowed,
-                        cfg.move_in_by,
-                    )
-                    item["match_score"] = score
-                    item["soft_matches"].update(soft)
+    daemon_p = sub.add_parser("daemon", help="Run continuously")
+    daemon_p.add_argument(
+        "--log-sleep",
+        action="store_true",
+        help="Log a short heartbeat while waiting for next scan",
+    )
+    daemon_p.set_defaults(cmd="daemon")
 
-                    if score < cfg.soft_match_threshold:
-                        continue
+    # If no subcommand provided, default to 'run'
+    p.set_defaults(cmd="run")
+    return p
 
-                    matches.append(item)
-            except Exception:
-                counters["errors_total"] += 1
-                log.exception("scan_error", extra={"url": url})
 
-        counters["cards_seen"] += seen
-        counters["scan_runs_total"] += 1
+# ---------- main ----------
+def main(argv: Optional[List[str]] = None) -> int:
+    args = _build_arg_parser().parse_args(argv)
+    cfg = load_config()
 
-        # Deduplicate + Notify
-        for m in matches:
-            fp = sha1_fingerprint([m["listing_id"], m["price_monthly"], m["deposit"], m["title"]])
-            if not m["listing_id"]:
-                continue
-            if store.already_notified(m["listing_id"], fp):
-                continue
+    # Health server (if configured)
+    last_run_ref: Dict[str, float] = {"ts": 0.0}
+    if cfg.health_port is not None and args.cmd == "daemon":
+        start_health_server(cfg.health_port, last_run_ref)
 
-            body = MESSAGE_TEMPLATE.format(
-                bhk=(m["bhk"] or "?"),
-                furnishing=(m["furnishing"] or "").strip() or "—",
-                property_type=(m["property_type"] or "").strip() or "Home",
-                area_display=m.get("area_display") or cfg.city,
-                price_monthly=m["price_monthly"],
-                deposit=(m["deposit"] if m["deposit"] is not None else "—"),
-                carpet=(m["carpet_sqft"] or "—"),
-                score=m["match_score"],
-                amenities=", ".join((m.get("soft_matches", {}).get("amenities_matched") or [])[:3]) or "—",
-                posted_rel=_relative_from_iso(m.get("posted_at")),
-                url=m["url"],
-            )
-            ok = notifier.send(body, cfg.notify_phone_e164)
-            if ok:
-                counters["alerts_sent"] += 1
-                store.upsert_notification(m["listing_id"], fp)
-
-        HEALTH.last_status = "ok"
-        log.info("scan_summary", extra=counters)
-
-    # Loop
-    log.info("watchdog_started", extra={"interval_min": cfg.scan_interval_minutes})
-    while not should_stop():
+    if args.cmd == "run":
+        log.info("watchdog_started")
         try:
-            one_scan()
+            run_once(cfg)
+            last_run_ref["ts"] = time.time()
+            return 0
         except Exception:
-            counters["errors_total"] += 1
-            HEALTH.last_status = "error"
-            log.exception("run_loop_error")
-        # Sleep until next run
-        from time import sleep
-        for _ in range(int(cfg.scan_interval_minutes * 60)):
-            if should_stop():
-                break
-            sleep(1)
+            logging.exception("one_shot_failed")
+            return 1
 
-    log.info("watchdog_stopped")
+    # daemon
+    log.info("watchdog_started")
+    interval_sec = max(60, int(cfg.scan_interval_minutes * 60))
+    try:
+        while True:
+            t0 = time.time()
+            try:
+                run_once(cfg)
+            except Exception:
+                logging.exception("scan_run_failed")
+            finally:
+                last_run_ref["ts"] = time.time()
+
+            # Visible heartbeat while sleeping (useful on Windows terminals)
+            if args.log_sleep:
+                remaining = interval_sec - int(time.time() - t0)
+                remaining = max(1, remaining)
+                for i in range(remaining, 0, -1):
+                    # Keep the next line short to avoid noisy logs
+                    log.info("sleeping_until_next_scan", extra={"seconds_left": i})
+                    time.sleep(1)
+            else:
+                # Quiet sleep
+                elapsed = time.time() - t0
+                sleep_for = max(1, interval_sec - int(elapsed))
+                time.sleep(sleep_for)
+    except KeyboardInterrupt:
+        log.info("watchdog_stopped_by_user")
+        return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

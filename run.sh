@@ -11,4 +11,4 @@ fi
 poetry install --no-interaction --no-ansi
 
 # Run once (polling loop is handled by the app using SCAN_INTERVAL_MINUTES)
-poetry run nobroker-watchdog run
+poetry run python -m nobroker_watchdog.main daemon
