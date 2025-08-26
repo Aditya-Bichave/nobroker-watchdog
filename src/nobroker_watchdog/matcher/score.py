@@ -67,7 +67,9 @@ def hard_pass(
     now = datetime.now(tz=timezone.utc)
     # area match or within radius
     area_txt = (item.get("area_display") or "").lower()
-    area_ok = any(a.lower() in area_txt for a in areas if a)
+    area_ok = any(
+        a and (a.lower() in area_txt or area_txt in a.lower()) for a in areas
+    )
     prox_km = None
 
     if not area_ok and proximity_km and item.get("latitude") and item.get("longitude") and area_coords:
