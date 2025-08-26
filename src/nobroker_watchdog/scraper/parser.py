@@ -4,6 +4,7 @@ import datetime as dt
 import json
 import logging
 import re
+from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from bs4 import BeautifulSoup
@@ -317,6 +318,14 @@ def parse_search_page(html: str, now: dt.datetime) -> List[Dict[str, Any]]:
         for item in items:
             item["scraped_at"] = iso_now
         return items
+
+    # No structured listings found: dump HTML for debugging before fallback
+    try:
+        debug_dir = Path(".debug")
+        debug_dir.mkdir(parents=True, exist_ok=True)
+        (debug_dir / "last_empty.html").write_text(html, encoding="utf-8")
+    except Exception:  # pragma: no cover - best effort
+        log.warning("failed to write .debug/last_empty.html", exc_info=True)
 
     # Fallback: parse simple anchors
     soup = BeautifulSoup(html, "html.parser")

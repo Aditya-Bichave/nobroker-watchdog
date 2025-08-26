@@ -15,3 +15,18 @@ def test_parse_search_page_fixture():
     )
     assert item["price_monthly"] == 0
     assert item["amenities"] == []
+
+
+def test_empty_page_written_to_debug(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    now = datetime.now(tz=timezone.utc)
+
+    html1 = "<html><body>no listings</body></html>"
+    assert parse_search_page(html1, now) == []
+    debug_file = tmp_path / ".debug" / "last_empty.html"
+    assert debug_file.exists()
+    assert debug_file.read_text(encoding="utf-8") == html1
+
+    html2 = "<html><body>still none</body></html>"
+    assert parse_search_page(html2, now) == []
+    assert debug_file.read_text(encoding="utf-8") == html2
