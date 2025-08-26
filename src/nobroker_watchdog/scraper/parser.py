@@ -4,7 +4,10 @@ import datetime as dt
 import json
 import logging
 import re
+from pathlib import Path
 from typing import Any, Dict, List, Optional
+
+from bs4 import BeautifulSoup
 
 log = logging.getLogger(__name__)
 
@@ -283,3 +286,139 @@ def parse_nobroker_api_json(payload: Dict[str, Any]) -> List[Dict[str, Any]]:
         return items
     except Exception:
         return []
+
+
+def parse_search_page(html: str, now: dt.datetime) -> List[Dict[str, Any]]:
+    """Parse a NoBroker search results page.
+
+    The function first attempts to extract structured JSON listings via
+    :func:`parse_list_page_html`.  When no embedded data is found (common for
+    skeleton pages or minimal fallbacks), it scans the HTML for plain anchor
+    tags pointing to ``/property`` URLs and constructs minimal listing objects
+    with sane defaults.
+
+    Parameters
+    ----------
+    html:
+        Raw HTML string of the search results page.
+    now:
+        Timestamp used for the ``scraped_at`` field in returned items.
+
+    Returns
+    -------
+    List[Dict[str, Any]]
+        Normalised listing dictionaries.
+    """
+
+    iso_now = now.astimezone(dt.timezone.utc).isoformat().replace("+00:00", "Z")
+
+    # First try the structured SSR JSON parser
+    items = parse_list_page_html(html)
+    if items:
+        for item in items:
+            item["scraped_at"] = iso_now
+        return items
+
+    # No structured listings found: dump HTML for debugging before fallback
+    try:
+        debug_dir = Path(".debug")
+        debug_dir.mkdir(parents=True, exist_ok=True)
+        (debug_dir / "last_empty.html").write_text(html, encoding="utf-8")
+    except Exception:  # pragma: no cover - best effort
+        log.warning("failed to write .debug/last_empty.html", exc_info=True)
+
+    # Fallback: parse simple anchors
+    soup = BeautifulSoup(html, "html.parser")
+    out: List[Dict[str, Any]] = []
+    for a in soup.find_all("a", href=True):
+        href = a["href"]
+        if "/property" not in href:
+            continue
+        url = href if href.startswith("http") else f"https://www.nobroker.in{href}"
+        listing_id = url.rstrip("/").split("/")[-1]
+        title = a.get_text(strip=True) or "Rental home"
+
+        out.append({
+            "listing_id": listing_id,
+            "scraped_at": iso_now,
+            "title": title,
+            "url": url,
+            "posted_at": None,
+            "area_display": "",
+            "city": "",
+            "latitude": None,
+            "longitude": None,
+            "price_monthly": 0,
+            "deposit": None,
+            "bhk": None,
+            "furnishing": None,
+            "property_type": None,
+            "carpet_sqft": None,
+            "floor_info": None,
+            "amenities": [],
+            "pets_allowed": None,
+            "images_count": None,
+            "description": None,
+            "match_score": 0,
+            "hard_filters_passed": False,
+            "soft_matches": {
+                "amenities_matched": [],
+                "proximity_km": None,
+                "carpet_ok": None,
+                "move_in_ok": None,
+            },
+        })
+
+    return out
+
+
+def normalize_raw_listing(raw: Dict[str, Any], now: dt.datetime) -> Dict[str, Any]:
+    """Ensure a listing dictionary has the expected fields and defaults.
+
+    This is primarily used in tests and when minimal HTML parsing is performed.
+    It normalises URLs, derives the ``listing_id`` if missing and fills all
+    expected keys with safe default values.
+    """
+
+    iso_now = now.astimezone(dt.timezone.utc).isoformat().replace("+00:00", "Z")
+
+    url = raw.get("url") or raw.get("href")
+    if url and not url.startswith("http"):
+        url = f"https://www.nobroker.in{url}"
+
+    listing_id = raw.get("listing_id")
+    if not listing_id and url:
+        listing_id = url.rstrip("/").split("/")[-1]
+
+    item = {
+        "listing_id": listing_id or "",
+        "scraped_at": raw.get("scraped_at", iso_now),
+        "title": raw.get("title") or "Rental home",
+        "url": url,
+        "posted_at": raw.get("posted_at"),
+        "area_display": raw.get("area_display") or "",
+        "city": raw.get("city") or "",
+        "latitude": raw.get("latitude"),
+        "longitude": raw.get("longitude"),
+        "price_monthly": raw.get("price_monthly") or 0,
+        "deposit": raw.get("deposit"),
+        "bhk": raw.get("bhk"),
+        "furnishing": raw.get("furnishing"),
+        "property_type": raw.get("property_type"),
+        "carpet_sqft": raw.get("carpet_sqft"),
+        "floor_info": raw.get("floor_info"),
+        "amenities": raw.get("amenities") if isinstance(raw.get("amenities"), list) else [],
+        "pets_allowed": raw.get("pets_allowed"),
+        "images_count": raw.get("images_count"),
+        "description": raw.get("description"),
+        "match_score": raw.get("match_score", 0),
+        "hard_filters_passed": raw.get("hard_filters_passed", False),
+        "soft_matches": raw.get("soft_matches") or {
+            "amenities_matched": [],
+            "proximity_km": None,
+            "carpet_ok": None,
+            "move_in_ok": None,
+        },
+    }
+
+    return item
