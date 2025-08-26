@@ -1,0 +1,4 @@
+/config.sample.yaml
+/.env
+/.env.example
+/.debug/last_empty.html

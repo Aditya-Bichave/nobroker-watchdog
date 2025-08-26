@@ -17,7 +17,7 @@ from nobroker_watchdog.scraper.parser import parse_list_page_html, parse_nobroke
 # ---------- logging ----------
 log = logging.getLogger("nobroker_watchdog.main")
 logging.basicConfig(
-    level=logging.INFO,
+    level=logging.DEBUG,
     format='{"ts":"%(asctime)s","level":"%(levelname)s","logger":"%(name)s","msg":"%(message)s"}',
 )
 
