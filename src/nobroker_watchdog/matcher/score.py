@@ -130,6 +130,8 @@ def soft_score(
         "amenities_matched": [],
         "proximity_km": item.get("soft_matches", {}).get("proximity_km"),
         "carpet_ok": None,
+        "floor_ok": None,
+        "pets_ok": None,
         "move_in_ok": None,
     }
 
@@ -156,6 +158,7 @@ def soft_score(
     floor_ok = _floor_ok(item.get("floor_info"), floors_allowed_in)
     if floor_ok:
         score += W_FLOOR
+    matches["floor_ok"] = floor_ok
 
     # pets
     pets_inferred = _infer_pets(item.get("description"))
@@ -167,6 +170,7 @@ def soft_score(
             pets_ok = pets_inferred == pets_allowed
     if pets_ok:
         score += W_PETS
+    matches["pets_ok"] = pets_ok
 
     # move-in by (approximation: posted date suggests availability soon)
     move_in_ok = None

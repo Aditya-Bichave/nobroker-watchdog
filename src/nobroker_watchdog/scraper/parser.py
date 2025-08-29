@@ -6,6 +6,8 @@ import logging
 import re
 from typing import Any, Dict, List, Optional
 
+from bs4 import BeautifulSoup
+
 log = logging.getLogger(__name__)
 
 # ---------- utilities ----------
@@ -186,12 +188,50 @@ def parse_list_page_html(html: str) -> List[Dict[str, Any]]:
                     "amenities_matched": [],
                     "proximity_km": None,
                     "carpet_ok": None,
+                    "floor_ok": None,
+                    "pets_ok": None,
                     "move_in_ok": None,
                 },
             })
         return items
     except Exception:
         return []
+
+
+def parse_search_page(html: str, scraped_at: dt.datetime) -> List[Dict[str, Any]]:
+    """Best-effort parse of a search result HTML page.
+
+    First tries to parse server-rendered JSON via :func:`parse_list_page_html`.
+    If that yields no results, falls back to extracting property links from
+    simple anchor tags.
+    """
+
+    items = parse_list_page_html(html)
+    if items:
+        return items
+
+    soup = BeautifulSoup(html, "html.parser")
+    results: List[Dict[str, Any]] = []
+    for a in soup.find_all("a", href=True):
+        href = a["href"]
+        if "/property/" not in href:
+            continue
+        url = href if href.startswith("http") else f"https://www.nobroker.in{href}"
+        listing_id = url.rstrip("/").split("/")[-1]
+        results.append({"listing_id": listing_id, "url": url, "scraped_at": scraped_at.isoformat()})
+    return results
+
+
+def normalize_raw_listing(raw: Dict[str, Any], scraped_at: dt.datetime) -> Dict[str, Any]:
+    """Normalize a raw listing dictionary into the minimal structure used by tests."""
+
+    item = dict(raw)
+    if "listing_id" not in item:
+        url = str(item.get("url") or "")
+        item["listing_id"] = url.rstrip("/").split("/")[-1]
+    item.setdefault("url", None)
+    item.setdefault("scraped_at", scraped_at.isoformat())
+    return item
 
 
 # ---------- Public API JSON parsing (reliable fallback) ----------
@@ -277,6 +317,8 @@ def parse_nobroker_api_json(payload: Dict[str, Any]) -> List[Dict[str, Any]]:
                     "amenities_matched": [],
                     "proximity_km": None,
                     "carpet_ok": None,
+                    "floor_ok": None,
+                    "pets_ok": None,
                     "move_in_ok": None,
                 },
             })

@@ -20,7 +20,29 @@ def test_soft_score_basic():
     )
     assert score >= 70
     assert soft["carpet_ok"] is True
+    assert soft["floor_ok"] is True
+    assert soft["pets_ok"] is True
     assert "lift" in soft["amenities_matched"]
+
+
+def test_soft_score_floor_pets_fail():
+    item = {
+        "amenities": [],
+        "floor_info": "5 of 5",
+        "description": "Pets not allowed apartment",
+        "posted_at": (datetime.now(tz=timezone.utc) - timedelta(hours=6)).isoformat(),
+        "soft_matches": {},
+    }
+    score, soft = soft_score(
+        item,
+        required_amenities_any=[],
+        carpet_min_sqft=0,
+        floors_allowed_in=["1", "2"],
+        pets_allowed=True,
+        move_in_by=None,
+    )
+    assert soft["floor_ok"] is False
+    assert soft["pets_ok"] is False
 
 def test_hard_pass_budget_area():
     item = {
