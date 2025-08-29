@@ -1,8 +1,6 @@
 from __future__ import annotations
 import logging
 import signal
-import threading
-import time
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from typing import Optional
 
