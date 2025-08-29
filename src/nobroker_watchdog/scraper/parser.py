@@ -91,6 +91,93 @@ def _int_or_none(x: Any) -> Optional[int]:
             return None
 
 
+def _float_or_none(x: Any) -> Optional[float]:
+    if x in (None, ""):
+        return None
+    try:
+        return float(x)
+    except Exception:
+        try:
+            m = _digits.search(str(x))
+            return float(m.group(0)) if m else None
+        except Exception:
+            return None
+
+
+def _normalize_property(p: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    """Map a raw property dict to the normalized schema used by the scraper."""
+    listing_id = str(p.get("propertyId") or p.get("id") or "")
+    if not listing_id:
+        return None
+
+    title = p.get("title") or p.get("society") or p.get("buildingName") or "Rental home"
+    society = p.get("society") or p.get("projectName")
+    if society and society not in title and title != "Rental home":
+        title = f"{title} • {society}"
+
+    url_path = p.get("seoUrl") or p.get("url") or f"/property/{listing_id}"
+    url = url_path if str(url_path).startswith("http") else f"https://www.nobroker.in{url_path}"
+
+    posted_at = to_iso(p.get("lastUpdateDate") or p.get("creationDate"))
+
+    rent = _int_or_none(p.get("rent") or p.get("rentMonthly") or p.get("rentMonthlyPrice"))
+    deposit = _int_or_none(p.get("deposit") or p.get("securityDeposit"))
+    bhk = _int_or_none(p.get("bhk") or p.get("bedrooms"))
+
+    furnishing = p.get("furnishing") or p.get("furnishingDesc")
+    if isinstance(furnishing, str):
+        furnishing = furnishing.replace("_", " ").title()
+
+    prop_type = p.get("propertyType") or p.get("type")
+    if isinstance(prop_type, str):
+        prop_type = prop_type.replace("_", " ").title()
+
+    area_disp = p.get("locality") or p.get("location") or p.get("microMarket") or ""
+    city = p.get("city") or p.get("cityName") or ""
+    lat = _float_or_none(p.get("latitude") or p.get("lat"))
+    lon = _float_or_none(p.get("longitude") or p.get("lon"))
+
+    carpet = _int_or_none(p.get("carpetArea") or p.get("carpetSqft") or p.get("builtupArea"))
+    floor_info = p.get("floor") or p.get("floorInfo")
+    amenities = p.get("amenities") or p.get("amenitiesMap") or []
+    if isinstance(amenities, dict):
+        amenities = [k for k, v in amenities.items() if v]
+    pets = p.get("petsAllowed")
+    img_count = _int_or_none(p.get("photoCount")) or len(p.get("photos") or [])
+    desc = p.get("description") or p.get("propertyDescription")
+
+    return {
+        "listing_id": listing_id,
+        "scraped_at": dt.datetime.utcnow().isoformat() + "Z",
+        "title": title,
+        "url": url,
+        "posted_at": posted_at,
+        "area_display": area_disp or "",
+        "city": city or "",
+        "latitude": lat,
+        "longitude": lon,
+        "price_monthly": rent or 0,
+        "deposit": deposit,
+        "bhk": bhk,
+        "furnishing": furnishing if isinstance(furnishing, str) else None,
+        "property_type": prop_type if isinstance(prop_type, str) else None,
+        "carpet_sqft": carpet,
+        "floor_info": str(floor_info) if floor_info not in (None, "") else None,
+        "amenities": amenities if isinstance(amenities, list) else [],
+        "pets_allowed": bool(pets) if pets is not None else None,
+        "images_count": img_count if isinstance(img_count, int) else None,
+        "description": desc,
+        "match_score": 0,
+        "hard_filters_passed": False,
+        "soft_matches": {
+            "amenities_matched": [],
+            "proximity_km": None,
+            "carpet_ok": None,
+            "move_in_ok": None,
+        },
+    }
+
+
 # ---------- HTML list page parsing (best-effort; returns [] on skeleton pages) ----------
 
 _script_json_re = re.compile(
@@ -126,69 +213,9 @@ def parse_list_page_html(html: str) -> List[Dict[str, Any]]:
 
         items: List[Dict[str, Any]] = []
         for p in props:
-            listing_id = str(p.get("propertyId") or p.get("id") or "")
-            if not listing_id:
-                continue
-            title = p.get("title") or p.get("society") or p.get("buildingName") or "Rental home"
-            url_path = p.get("seoUrl") or p.get("url") or f"/property/{listing_id}"
-            url = url_path if str(url_path).startswith("http") else f"https://www.nobroker.in{url_path}"
-            posted_at = to_iso(p.get("lastUpdateDate") or p.get("creationDate"))
-            rent = _int_or_none(p.get("rent") or p.get("rentMonthly"))
-            deposit = _int_or_none(p.get("deposit") or p.get("securityDeposit"))
-            bhk = _int_or_none(p.get("bhk") or p.get("bedrooms"))
-
-            furnishing = p.get("furnishing") or p.get("furnishingDesc")
-            if isinstance(furnishing, str):
-                furnishing = furnishing.replace("_", " ").title()
-
-            prop_type = p.get("propertyType") or p.get("type")
-            if isinstance(prop_type, str):
-                prop_type = prop_type.replace("_", " ").title()
-
-            area_disp = p.get("locality") or p.get("location") or p.get("microMarket") or ""
-            city = p.get("city") or p.get("cityName") or ""
-            lat = p.get("latitude") or p.get("lat")
-            lon = p.get("longitude") or p.get("lon")
-
-            carpet = _int_or_none(p.get("carpetArea") or p.get("carpetSqft") or p.get("builtupArea"))
-            floor_info = p.get("floor") or p.get("floorInfo")
-            amenities = p.get("amenities") or []
-            if isinstance(amenities, dict):
-                amenities = [k for k, v in amenities.items() if v]
-            pets = p.get("petsAllowed")
-            img_count = _int_or_none(p.get("photoCount")) or len(p.get("photos") or [])
-            desc = p.get("description") or p.get("propertyDescription")
-
-            items.append({
-                "listing_id": listing_id,
-                "scraped_at": dt.datetime.utcnow().isoformat() + "Z",
-                "title": title,
-                "url": url,
-                "posted_at": posted_at,
-                "area_display": area_disp or "",
-                "city": city or "",
-                "latitude": float(lat) if lat not in (None, "") else None,
-                "longitude": float(lon) if lon not in (None, "") else None,
-                "price_monthly": rent or 0,
-                "deposit": deposit,
-                "bhk": bhk,
-                "furnishing": furnishing if isinstance(furnishing, str) else None,
-                "property_type": prop_type if isinstance(prop_type, str) else None,
-                "carpet_sqft": carpet,
-                "floor_info": str(floor_info) if floor_info not in (None, "") else None,
-                "amenities": amenities if isinstance(amenities, list) else [],
-                "pets_allowed": bool(pets) if pets is not None else None,
-                "images_count": img_count if isinstance(img_count, int) else None,
-                "description": desc,
-                "match_score": 0,
-                "hard_filters_passed": False,
-                "soft_matches": {
-                    "amenities_matched": [],
-                    "proximity_km": None,
-                    "carpet_ok": None,
-                    "move_in_ok": None,
-                },
-            })
+            norm = _normalize_property(p)
+            if norm:
+                items.append(norm)
         return items
     except Exception:
         return []
@@ -210,76 +237,9 @@ def parse_nobroker_api_json(payload: Dict[str, Any]) -> List[Dict[str, Any]]:
         items: List[Dict[str, Any]] = []
         for obj in results:
             p = obj.get("property") or obj
-
-            listing_id = str(p.get("propertyId") or p.get("id") or "")
-            if not listing_id:
-                continue
-
-            title = p.get("title") or p.get("society") or p.get("buildingName") or "Rental home"
-            url_path = p.get("seoUrl") or p.get("url") or f"/property/{listing_id}"
-            url = url_path if str(url_path).startswith("http") else f"https://www.nobroker.in{url_path}"
-
-            posted_at = to_iso(p.get("lastUpdateDate") or p.get("creationDate"))
-
-            rent = _int_or_none(p.get("rent") or p.get("rentMonthly") or p.get("rentMonthlyPrice"))
-            deposit = _int_or_none(p.get("deposit") or p.get("securityDeposit"))
-            bhk = _int_or_none(p.get("bhk") or p.get("bedrooms"))
-
-            furnishing = p.get("furnishing") or p.get("furnishingDesc")
-            if isinstance(furnishing, str):
-                furnishing = furnishing.replace("_", " ").title()
-
-            prop_type = p.get("propertyType") or p.get("type")
-            if isinstance(prop_type, str):
-                prop_type = prop_type.replace("_", " ").title()
-
-            area_disp = p.get("locality") or p.get("location") or p.get("microMarket") or ""
-            city = p.get("city") or p.get("cityName") or ""
-            lat = p.get("latitude") or p.get("lat")
-            lon = p.get("longitude") or p.get("lon")
-
-            carpet = _int_or_none(p.get("carpetArea") or p.get("carpetSqft") or p.get("builtupArea"))
-            floor_info = p.get("floor") or p.get("floorInfo")
-            amenities = p.get("amenities") or p.get("amenitiesMap") or []
-            if isinstance(amenities, dict):
-                amenities = [k for k, v in amenities.items() if v]
-            pets = p.get("petsAllowed")
-            img_count = _int_or_none(p.get("photoCount")) or len(p.get("photos") or [])
-            desc = p.get("description") or p.get("propertyDescription")
-            society = p.get("society") or p.get("projectName")
-            if society and society not in title and title != "Rental home":
-                title = f"{title} • {society}"
-
-            items.append({
-                "listing_id": listing_id,
-                "scraped_at": dt.datetime.utcnow().isoformat() + "Z",
-                "title": title,
-                "url": url,
-                "posted_at": posted_at,
-                "area_display": area_disp or "",
-                "city": city or "",
-                "latitude": float(lat) if lat not in (None, "") else None,
-                "longitude": float(lon) if lon not in (None, "") else None,
-                "price_monthly": rent or 0,
-                "deposit": deposit,
-                "bhk": bhk,
-                "furnishing": furnishing if isinstance(furnishing, str) else None,
-                "property_type": prop_type if isinstance(prop_type, str) else None,
-                "carpet_sqft": carpet,
-                "floor_info": str(floor_info) if floor_info not in (None, "") else None,
-                "amenities": amenities if isinstance(amenities, list) else [],
-                "pets_allowed": bool(pets) if pets is not None else None,
-                "images_count": img_count if isinstance(img_count, int) else None,
-                "description": desc,
-                "match_score": 0,
-                "hard_filters_passed": False,
-                "soft_matches": {
-                    "amenities_matched": [],
-                    "proximity_km": None,
-                    "carpet_ok": None,
-                    "move_in_ok": None,
-                },
-            })
+            norm = _normalize_property(p)
+            if norm:
+                items.append(norm)
         return items
     except Exception:
         return []
