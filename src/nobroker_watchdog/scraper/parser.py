@@ -193,6 +193,62 @@ def parse_list_page_html(html: str) -> List[Dict[str, Any]]:
     except Exception:
         return []
 
+def parse_search_page(html: str, now: dt.datetime) -> List[Dict[str, Any]]:
+    """Parse an HTML search results page.
+
+    Attempts to extract listings from embedded JSON first; if that fails,
+    falls back to parsing simple anchor tags."""
+    items = parse_list_page_html(html)
+    if items:
+        return items
+
+    results: List[Dict[str, Any]] = []
+    for m in re.finditer(r'<a[^>]+href="(?P<href>/property/[^"#?]+)"[^>]*>(?P<title>[^<]+)</a>', html):
+        url_path = m.group("href")
+        listing_id = url_path.rstrip("/").split("/")[-1]
+        url = url_path if url_path.startswith("http") else f"https://www.nobroker.in{url_path}"
+        results.append(
+            {
+                "listing_id": listing_id,
+                "scraped_at": now.astimezone(dt.timezone.utc).isoformat().replace("+00:00", "Z"),
+                "title": m.group("title").strip(),
+                "url": url,
+                "posted_at": None,
+                "area_display": "",
+                "city": "",
+                "latitude": None,
+                "longitude": None,
+                "price_monthly": 0,
+                "deposit": None,
+                "bhk": None,
+                "furnishing": None,
+                "property_type": None,
+                "carpet_sqft": None,
+                "floor_info": None,
+                "amenities": [],
+                "pets_allowed": None,
+                "images_count": None,
+                "description": None,
+                "match_score": 0,
+                "hard_filters_passed": False,
+                "soft_matches": {
+                    "amenities_matched": [],
+                    "proximity_km": None,
+                    "carpet_ok": None,
+                    "move_in_ok": None,
+                },
+            }
+        )
+    return results
+
+def normalize_raw_listing(raw: Dict[str, Any], now: dt.datetime) -> Dict[str, Any]:
+    """Return a normalized copy of a raw listing."""
+    item = dict(raw)
+    item.setdefault(
+        "scraped_at",
+        now.astimezone(dt.timezone.utc).isoformat().replace('+00:00', 'Z'),
+    )
+    return item
 
 # ---------- Public API JSON parsing (reliable fallback) ----------
 

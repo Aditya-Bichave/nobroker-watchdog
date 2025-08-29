@@ -89,9 +89,7 @@ def hard_pass(
 
     # BHK
     bhk = item.get("bhk")
-    bhk_ok = (bhk is None) or (bhk in set(bhk_in))  # missing bhk => allow (fallback inference)
-    if bhk is not None:
-        bhk_ok = bhk in set(bhk_in)
+    bhk_ok = bhk is None or bhk in set(bhk_in)  # missing bhk => allow (fallback inference)
 
     # furnishing
     furn = (item.get("furnishing") or "").strip()
