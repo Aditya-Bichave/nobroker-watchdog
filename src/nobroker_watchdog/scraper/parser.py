@@ -194,6 +194,41 @@ def parse_list_page_html(html: str) -> List[Dict[str, Any]]:
         return []
 
 
+def parse_search_page(html: str, _now: dt.datetime) -> List[Dict[str, Any]]:
+    """Parse a search results HTML page.
+
+    Attempts the full JSON-based extraction first; if that yields nothing, falls
+    back to a minimal anchor-tag scan which is primarily used in tests.
+    The ``_now`` parameter is accepted for API compatibility but is not used.
+    """
+
+    items = parse_list_page_html(html)
+    if items:
+        return items
+
+    try:
+        results: List[Dict[str, Any]] = []
+        for href, _text in re.findall(r'<a[^>]+href="([^"]+)"[^>]*>(.*?)</a>', html, re.I):
+            if "/property/" not in href:
+                continue
+            listing_id = href.rstrip("/").split("/")[-1]
+            url = href if href.startswith("http") else f"https://www.nobroker.in{href}"
+            results.append({"listing_id": listing_id, "url": url})
+        return results
+    except Exception:
+        return []
+
+
+def normalize_raw_listing(raw: Dict[str, Any], _now: dt.datetime) -> Dict[str, Any]:
+    """Normalize a raw listing structure.
+
+    Listings returned by :func:`parse_list_page_html` are already normalized, so
+    this function simply returns the ``raw`` value unchanged.
+    """
+
+    return raw
+
+
 # ---------- Public API JSON parsing (reliable fallback) ----------
 
 def parse_nobroker_api_json(payload: Dict[str, Any]) -> List[Dict[str, Any]]:

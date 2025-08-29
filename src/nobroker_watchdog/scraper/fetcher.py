@@ -36,34 +36,33 @@ def fetch_url(
     hdrs = dict(DEFAULT_HEADERS)
     if headers:
         hdrs.update(headers)
-
-    session = requests.Session()
     delay = random.uniform(min_delay, max_delay)
 
-    for attempt in range(1, max_retries + 1):
-        try:
-            time.sleep(delay)
-            t0 = time.time()
-            resp = session.get(url, headers=hdrs, timeout=timeout)
-            dt_ms = int((time.time() - t0) * 1000)
-            log.debug("http_get_done", extra={"url": url, "status": resp.status_code, "ms": dt_ms})
+    with requests.Session() as session:
+        for attempt in range(1, max_retries + 1):
+            try:
+                time.sleep(delay)
+                t0 = time.time()
+                resp = session.get(url, headers=hdrs, timeout=timeout)
+                dt_ms = int((time.time() - t0) * 1000)
+                log.debug("http_get_done", extra={"url": url, "status": resp.status_code, "ms": dt_ms})
 
-            if resp.status_code in (200, 404):
-                return resp
+                if resp.status_code in (200, 404):
+                    return resp
 
-            # 429/5xx → backoff
-            if resp.status_code in (429, 500, 502, 503, 504):
-                raise RuntimeError(f"transient_status_{resp.status_code}")
+                # 429/5xx → backoff
+                if resp.status_code in (429, 500, 502, 503, 504):
+                    raise RuntimeError(f"transient_status_{resp.status_code}")
 
-            # Other statuses: treat as terminal
-            log.debug("http_unexpected_status", extra={"url": url, "status": resp.status_code})
-            return None
-        except Exception as e:
-            if attempt >= max_retries:
-                log.debug("http_get_failed", extra={"url": url, "attempt": attempt, "err": str(e)})
+                # Other statuses: treat as terminal
+                log.debug("http_unexpected_status", extra={"url": url, "status": resp.status_code})
                 return None
-            # backoff with some jitter
-            delay = min(max_delay, delay * (1.5 + random.random() * 0.5))
+            except Exception as e:
+                if attempt >= max_retries:
+                    log.debug("http_get_failed", extra={"url": url, "attempt": attempt, "err": str(e)})
+                    return None
+                # backoff with some jitter
+                delay = min(max_delay, delay * (1.5 + random.random() * 0.5))
 
     return None
 
