@@ -28,6 +28,6 @@ class WhatsAppClient:
                 return False
             log.info("whatsapp_sent", extra={"to": to_e164})
             return True
-        except Exception as e:
+        except Exception:
             log.exception("whatsapp_exception")
             return False
