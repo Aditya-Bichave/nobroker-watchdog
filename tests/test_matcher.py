@@ -48,3 +48,30 @@ def test_hard_pass_budget_area():
     )
     assert ok is True
     assert prox is None
+
+
+def test_hard_pass_missing_bhk():
+    item = {
+        "area_display": "Kadubeesanahalli",
+        "price_monthly": 30000,
+        "furnishing": "Semi-Furnished",
+        "property_type": "Apartment",
+        "posted_at": (datetime.now(tz=timezone.utc) - timedelta(hours=3)).isoformat(),
+        "latitude": None,
+        "longitude": None,
+    }
+    ok, prox = hard_pass(
+        item,
+        areas=["Kadubeesanahalli, Bangalore"],
+        city="Bangalore",
+        budget_min=20000,
+        budget_max=45000,
+        bhk_in=[1, 2],
+        furnishing_in=["Semi-Furnished", "Fully Furnished", "Unfurnished"],
+        property_types_in=["Apartment", "Independent House", "Gated Community"],
+        max_age_hours=48,
+        area_coords=None,
+        proximity_km=None,
+    )
+    assert ok is True
+    assert prox is None
