@@ -16,10 +16,6 @@ from nobroker_watchdog.scraper.parser import parse_list_page_html, parse_nobroke
 
 # ---------- logging ----------
 log = logging.getLogger("nobroker_watchdog.main")
-logging.basicConfig(
-    level=logging.DEBUG,
-    format='{"ts":"%(asctime)s","level":"%(levelname)s","logger":"%(name)s","msg":"%(message)s"}',
-)
 
 
 # ---------- tiny health server (optional) ----------
@@ -152,6 +148,10 @@ def _build_arg_parser() -> argparse.ArgumentParser:
 
 # ---------- main ----------
 def main(argv: Optional[List[str]] = None) -> int:
+    logging.basicConfig(
+        level=logging.DEBUG,
+        format='{"ts":"%(asctime)s","level":"%(levelname)s","logger":"%(name)s","msg":"%(message)s"}',
+    )
     args = _build_arg_parser().parse_args(argv)
     cfg = load_config()
 
