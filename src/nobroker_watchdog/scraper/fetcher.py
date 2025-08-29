@@ -74,10 +74,8 @@ def fetch_json(
         min_delay: float = 1.2,
         max_delay: float = 2.4,
         max_retries: int = 3,
-) -> Optional[Dict[str, Any]]:
-    """
-    JSON GET using the same politeness/backoff, returns dict or None.
-    """
+) -> Optional[Any]:
+    """JSON GET using the same politeness/backoff, returns parsed JSON or None."""
     resp = fetch_url(
         url,
         timeout=timeout,
@@ -89,12 +87,7 @@ def fetch_json(
     if resp is None:
         return None
     try:
-        # Prefer header; fallback on lenient parse for mislabelled responses
-        if "application/json" in (resp.headers.get("Content-Type") or ""):
-            return resp.json()
-        text = resp.text.strip()
-        if text.startswith("{") and text.endswith("}"):
-            return resp.json()
-    except Exception:
+        return resp.json()
+    except ValueError:
         log.debug("json_decode_failed", extra={"url": url})
-    return None
+        return None
