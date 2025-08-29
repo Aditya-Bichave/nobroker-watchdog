@@ -38,19 +38,27 @@ def parse_indic_money(s: str | None) -> Optional[int]:
     if not s:
         return None
     s = s.replace(",", "").strip().lower()
-    # Handle formats like "₹35,000", "35000", "35k", "35k/month"
-    m = re.search(r"(\d+(?:\.\d+)?)(\s*[kK]|(?:\s*l|lakh))?", s)
+    # Handle formats like "₹35,000", "35000", "35k", "2 lakhs", "1.5 cr"
+    m = re.search(r"(\d+(?:\.\d+)?)(?:\s*(k|l|lac|lakh|lacs|lakhs|cr|crore|crores))?", s)
     if not m:
         digits = re.sub(r"\D+", "", s)
         if digits:
             return int(digits)
         return None
     num = float(m.group(1))
-    unit = (m.group(2) or "").strip().lower()
-    if unit in {"k", "k/month", "k/mon"}:
-        num *= 1000
-    elif unit in {"l", "lakh"}:
-        num *= 100000
+    unit = (m.group(2) or "").strip()
+    multipliers = {
+        "k": 1_000,
+        "l": 100_000,
+        "lac": 100_000,
+        "lakh": 100_000,
+        "lacs": 100_000,
+        "lakhs": 100_000,
+        "cr": 10_000_000,
+        "crore": 10_000_000,
+        "crores": 10_000_000,
+    }
+    num *= multipliers.get(unit, 1)
     return int(num)
 
 def parse_relative_time(text: str, now: datetime) -> Optional[datetime]:
