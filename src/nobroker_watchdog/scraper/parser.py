@@ -4,6 +4,7 @@ import datetime as dt
 import json
 import logging
 import re
+from html.parser import HTMLParser
 from typing import Any, Dict, List, Optional
 
 log = logging.getLogger(__name__)
@@ -283,3 +284,62 @@ def parse_nobroker_api_json(payload: Dict[str, Any]) -> List[Dict[str, Any]]:
         return items
     except Exception:
         return []
+
+
+# ---------- Legacy search page parsing & normalization ----------
+
+
+class _ListingLinkParser(HTMLParser):
+    """Collect href attributes from ``<a>`` tags containing ``/property/``."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.links: List[str] = []
+
+    def handle_starttag(self, tag: str, attrs: List[tuple[str, str | None]]) -> None:
+        if tag != "a":
+            return
+        attrs_dict = dict(attrs)
+        href = attrs_dict.get("href")
+        if href and "/property/" in href:
+            self.links.append(href)
+
+
+def parse_search_page(html: str, now: dt.datetime) -> List[Dict[str, Any]]:
+    """Parse legacy HTML search results, returning raw listing dictionaries."""
+    items = parse_list_page_html(html)
+    if items:
+        return items
+
+    parser = _ListingLinkParser()
+    parser.feed(html)
+    results: List[Dict[str, Any]] = []
+    for href in parser.links:
+        listing_id = href.rstrip("/").split("/")[-1]
+        url = href if href.startswith("http") else f"https://www.nobroker.in{href}"
+        results.append(
+            {
+                "listing_id": listing_id,
+                "url": url,
+                "scraped_at": now.astimezone(dt.timezone.utc)
+                .isoformat()
+                .replace("+00:00", "")
+                + "Z",
+            }
+        )
+    return results
+
+
+def normalize_raw_listing(raw: Dict[str, Any], now: dt.datetime) -> Dict[str, Any]:
+    """Normalize a raw listing into a minimal stable structure."""
+    listing_id = str(raw.get("listing_id") or raw.get("id") or "")
+    url = raw.get("url") or raw.get("href") or ""
+    if url and not url.startswith("http"):
+        url = f"https://www.nobroker.in{url}"
+    scraped = raw.get("scraped_at") or now.astimezone(dt.timezone.utc).isoformat().replace(
+        "+00:00",
+        "",
+    )
+    if not scraped.endswith("Z"):
+        scraped += "Z"
+    return {"listing_id": listing_id, "url": url, "scraped_at": scraped}

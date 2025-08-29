@@ -1,5 +1,4 @@
 from __future__ import annotations
-from typing import List, Dict
 from .whatsapp import WhatsAppClient
 from .twilio_sms import TwilioClient
 
