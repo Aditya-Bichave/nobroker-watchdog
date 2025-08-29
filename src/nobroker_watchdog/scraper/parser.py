@@ -51,23 +51,23 @@ def to_iso(val: Any) -> Optional[str]:
 
         # relative phrases
         low = s.lower()
-        now = dt.datetime.utcnow()
+        now = dt.datetime.now(dt.UTC)
         if "hour" in low:
             m = _digits.search(low)
             hrs = int(m.group(0)) if m else 1
-            return (now - dt.timedelta(hours=hrs)).isoformat() + "Z"
+            return (now - dt.timedelta(hours=hrs)).isoformat().replace("+00:00", "Z")
         if "minute" in low:
             m = _digits.search(low)
             mins = int(m.group(0)) if m else 1
-            return (now - dt.timedelta(minutes=mins)).isoformat() + "Z"
+            return (now - dt.timedelta(minutes=mins)).isoformat().replace("+00:00", "Z")
         if "day" in low:
             m = _digits.search(low)
             days = int(m.group(0)) if m else 1
-            return (now - dt.timedelta(days=days)).isoformat() + "Z"
+            return (now - dt.timedelta(days=days)).isoformat().replace("+00:00", "Z")
         if "today" in low:
-            return now.isoformat() + "Z"
+            return now.isoformat().replace("+00:00", "Z")
         if "yesterday" in low:
-            return (now - dt.timedelta(days=1)).isoformat() + "Z"
+            return (now - dt.timedelta(days=1)).isoformat().replace("+00:00", "Z")
 
         # last fallback: try parsing as int
         if s.isdigit():
@@ -161,7 +161,7 @@ def parse_list_page_html(html: str) -> List[Dict[str, Any]]:
 
             items.append({
                 "listing_id": listing_id,
-                "scraped_at": dt.datetime.utcnow().isoformat() + "Z",
+                "scraped_at": dt.datetime.now(dt.UTC).isoformat().replace("+00:00", "Z"),
                 "title": title,
                 "url": url,
                 "posted_at": posted_at,
@@ -252,7 +252,7 @@ def parse_nobroker_api_json(payload: Dict[str, Any]) -> List[Dict[str, Any]]:
 
             items.append({
                 "listing_id": listing_id,
-                "scraped_at": dt.datetime.utcnow().isoformat() + "Z",
+                "scraped_at": dt.datetime.now(dt.UTC).isoformat().replace("+00:00", "Z"),
                 "title": title,
                 "url": url,
                 "posted_at": posted_at,
