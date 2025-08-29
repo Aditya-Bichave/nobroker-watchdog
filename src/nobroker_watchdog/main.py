@@ -60,12 +60,14 @@ def run_once(cfg: AppConfig) -> Dict[str, Any]:
     logging.getLogger("nobroker_watchdog.scraper.search_builder").info("search_urls_built")
 
     seen_area: set[str] = set()
+    seen_listings: set[str] = set()
     aggregated: List[Dict[str, Any]] = []
 
     for t in targets:
         if t.area_name in seen_area:
             continue
 
+        cards: List[Dict[str, Any]] = []
         if t.kind == "html":
             resp = fetch_url(
                 t.url,
@@ -81,12 +83,7 @@ def run_once(cfg: AppConfig) -> Dict[str, Any]:
             logging.getLogger("nobroker_watchdog.scraper.parser").debug(
                 "page_parse_result", extra={"url": t.url, "raw_count": len(cards)}
             )
-            if cards:
-                aggregated.extend(cards)
-                seen_area.add(t.area_name)
-                continue
-
-        if t.kind == "api":
+        elif t.kind == "api":
             payload = fetch_json(
                 t.url,
                 timeout=cfg.http_timeout_seconds,
@@ -101,9 +98,21 @@ def run_once(cfg: AppConfig) -> Dict[str, Any]:
             logging.getLogger("nobroker_watchdog.scraper.parser").debug(
                 "api_parse_result", extra={"url": t.url, "raw_count": len(cards)}
             )
-            if cards:
-                aggregated.extend(cards)
-                seen_area.add(t.area_name)
+        else:
+            continue
+
+        if not cards:
+            continue
+
+        added = False
+        for c in cards:
+            listing_id = str(c.get("listing_id") or "")
+            if listing_id and listing_id not in seen_listings:
+                aggregated.append(c)
+                seen_listings.add(listing_id)
+                added = True
+        if added:
+            seen_area.add(t.area_name)
 
     # Hook matcher/store/notifier here in your build — for now we just summarize.
     cards_seen = len(aggregated)
