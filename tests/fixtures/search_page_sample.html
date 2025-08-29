@@ -5,7 +5,11 @@
   <title>NoBroker Test Fixture</title>
 </head>
 <body>
-  <!-- Minimal fallback structure -->
-  <a href="/property/for-rent/test-listing-id-1234">2 BHK Apartment in Kadubeesanahalli</a>
+  <script>
+    window.nb = window.nb || {};
+    nb.pageName="listPage";
+    nb.appState = {"listPage":{"listPageProperties":[{"propertyId":1,"seoUrl":"/property/1"}]}};
+  </script>
 </body>
 </html>
+
