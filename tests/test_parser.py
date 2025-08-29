@@ -10,3 +10,13 @@ def test_parse_search_page_fixture():
     item = normalize_raw_listing(raw[0], datetime.now(tz=timezone.utc))
     assert "listing_id" in item
     assert "url" in item
+
+
+def test_normalize_raw_listing_defaults():
+    now = datetime.now(tz=timezone.utc)
+    raw = {"id": "123", "url": "https://example.com"}
+    item = normalize_raw_listing(raw, now)
+    assert item["listing_id"] == "123"
+    assert item["url"] == "https://example.com"
+    assert item["price_monthly"] == 0
+    assert item["amenities"] == []

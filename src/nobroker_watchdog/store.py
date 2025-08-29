@@ -1,9 +1,11 @@
 from __future__ import annotations
-import json
+
+import logging
 import os
 import sqlite3
 from datetime import datetime, timezone
-from typing import Optional
+from types import TracebackType
+from typing import Optional, Type
 
 DB_PATH = os.environ.get("STATE_DB_PATH", "state.db")
 
@@ -16,6 +18,9 @@ CREATE TABLE IF NOT EXISTS notified (
 );
 """
 
+log = logging.getLogger(__name__)
+
+
 class StateStore:
     def __init__(self, path: str = DB_PATH):
         self.path = path
@@ -24,6 +29,17 @@ class StateStore:
         self.conn.execute("PRAGMA synchronous=NORMAL;")
         self.conn.execute(SCHEMA)
         self.conn.commit()
+
+    def __enter__(self) -> "StateStore":
+        return self
+
+    def __exit__(
+        self,
+        exc_type: Optional[Type[BaseException]],
+        exc: Optional[BaseException],
+        tb: Optional[TracebackType],
+    ) -> None:
+        self.close()
 
     def already_notified(self, listing_id: str, fingerprint: str) -> bool:
         cur = self.conn.execute(
@@ -36,7 +52,9 @@ class StateStore:
 
     def upsert_notification(self, listing_id: str, fingerprint: str) -> None:
         now = datetime.now(tz=timezone.utc).isoformat()
-        cur = self.conn.execute("SELECT listing_id FROM notified WHERE listing_id = ?", (listing_id,))
+        cur = self.conn.execute(
+            "SELECT listing_id FROM notified WHERE listing_id = ?", (listing_id,)
+        )
         if cur.fetchone():
             self.conn.execute(
                 "UPDATE notified SET fingerprint=?, last_notified=? WHERE listing_id=?",
@@ -49,8 +67,8 @@ class StateStore:
             )
         self.conn.commit()
 
-    def close(self):
+    def close(self) -> None:
         try:
             self.conn.close()
         except Exception:
-            pass
+            log.exception("state_store_close_failed")

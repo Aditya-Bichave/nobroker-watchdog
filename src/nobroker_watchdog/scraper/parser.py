@@ -194,6 +194,93 @@ def parse_list_page_html(html: str) -> List[Dict[str, Any]]:
         return []
 
 
+# ---------- High level helpers used by tests & other modules ----------
+
+
+_fallback_link_re = re.compile(
+    r"<a[^>]+href=['\"](?P<href>/property[^'\"]+)['\"][^>]*>(?P<title>.*?)</a>",
+    re.IGNORECASE,
+)
+
+
+def parse_search_page(html: str, now: dt.datetime) -> List[Dict[str, Any]]:
+    """Best-effort parser for a NoBroker search result page.
+
+    Attempts to parse richer JSON data via :func:`parse_list_page_html`.
+    If that yields no results, falls back to scraping basic ``<a>`` tags so
+    tests can still exercise downstream logic using minimal fixtures.
+    ``now`` is only used to populate ``scraped_at`` in the fallback path.
+    """
+
+    # Try the structured SSR payload first.
+    items = parse_list_page_html(html)
+    if items:
+        return items
+
+    # Fallback: extract simple anchor tags.
+    results: List[Dict[str, Any]] = []
+    for match in _fallback_link_re.finditer(html):
+        href = match.group("href")
+        title = match.group("title").strip()
+
+        # Extract the trailing portion of the URL as an id.
+        m_id = re.search(r"/([^/]+)$", href)
+        listing_id = m_id.group(1) if m_id else href
+
+        url = href if href.startswith("http") else f"https://www.nobroker.in{href}"
+
+        results.append(
+            {
+                "id": listing_id,
+                "title": title,
+                "url": url,
+                "scraped_at": now.astimezone(dt.timezone.utc)
+                .isoformat()
+                .replace("+00:00", "Z"),
+            }
+        )
+
+    return results
+
+
+def normalize_raw_listing(raw: Dict[str, Any], now: dt.datetime) -> Dict[str, Any]:
+    """Normalize heterogeneous listing dictionaries into a common schema."""
+
+    soft_matches = raw.get("soft_matches") or {
+        "amenities_matched": [],
+        "proximity_km": None,
+        "carpet_ok": None,
+        "move_in_ok": None,
+    }
+
+    return {
+        "listing_id": str(raw.get("listing_id") or raw.get("id") or ""),
+        "scraped_at": raw.get("scraped_at")
+        or now.astimezone(dt.timezone.utc).isoformat().replace("+00:00", "Z"),
+        "title": raw.get("title") or "",
+        "url": raw.get("url") or "",
+        "posted_at": raw.get("posted_at"),
+        "area_display": raw.get("area_display") or "",
+        "city": raw.get("city") or "",
+        "latitude": raw.get("latitude"),
+        "longitude": raw.get("longitude"),
+        "price_monthly": _int_or_none(raw.get("price_monthly") or raw.get("rent")) or 0,
+        "deposit": _int_or_none(raw.get("deposit")),
+        "bhk": _int_or_none(raw.get("bhk")),
+        "furnishing": raw.get("furnishing"),
+        "property_type": raw.get("property_type"),
+        "carpet_sqft": _int_or_none(raw.get("carpet_sqft")),
+        "floor_info": raw.get("floor_info"),
+        "amenities": raw.get("amenities") if isinstance(raw.get("amenities"), list) else [],
+        "pets_allowed": raw.get("pets_allowed"),
+        "images_count": _int_or_none(raw.get("images_count")),
+        "description": raw.get("description"),
+        "match_score": raw.get("match_score") or 0,
+        "hard_filters_passed": bool(raw.get("hard_filters_passed")),
+        "soft_matches": soft_matches,
+    }
+
+
 # ---------- Public API JSON parsing (reliable fallback) ----------
 
 def parse_nobroker_api_json(payload: Dict[str, Any]) -> List[Dict[str, Any]]:
